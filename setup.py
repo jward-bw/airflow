@@ -425,12 +425,12 @@ def do_setup():
     """Perform the Airflow package setup."""
     write_version()
     setup(
-        name='apache-airflow',
+        name='apache-airflow-fork',
         description='Programmatically author, schedule and monitor data pipelines',
         long_description=long_description,
         long_description_content_type='text/markdown',
         license='Apache License 2.0',
-        version=version,
+        version='1.10.7rc4',
         packages=find_packages(exclude=['tests*']),
         package_data={
             '': ['airflow/alembic.ini', "airflow/git_version"],

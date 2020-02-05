@@ -34,3 +34,5 @@ graft scripts/upstart
 graft airflow/config_templates
 recursive-exclude airflow/www_rbac/node_modules *
 global-exclude __pycache__  *.pyc
+
+include airflow/serialization/schema.json

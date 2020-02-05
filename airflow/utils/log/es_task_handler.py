@@ -22,6 +22,7 @@ import elasticsearch
 import logging
 import sys
 import pendulum
+from datetime import datetime
 from elasticsearch_dsl import Search
 
 from airflow.utils import timezone
@@ -78,6 +79,7 @@ class ElasticsearchTaskHandler(FileTaskHandler, LoggingMixin):
         self.json_fields = [label.strip() for label in json_fields.split(",")]
         self.handler = None
         self.context_set = False
+        self.offset = 1
 
     def _render_log_id(self, ti, try_number):
         if self.log_id_jinja_template:
@@ -125,7 +127,7 @@ class ElasticsearchTaskHandler(FileTaskHandler, LoggingMixin):
 
         logs = self.es_read(log_id, offset, metadata)
 
-        next_offset = offset if not logs else logs[-1].offset
+        next_offset = offset if not logs else logs[-1]['_source']['json']['offset']
 
         # Ensure a string here. Large offset numbers will get JSON.parsed incorrectly
         # on the client. Sending as a string prevents this issue.
@@ -135,7 +137,7 @@ class ElasticsearchTaskHandler(FileTaskHandler, LoggingMixin):
         # end_of_log_mark may contain characters like '\n' which is needed to
         # have the log uploaded but will not be stored in elasticsearch.
         metadata['end_of_log'] = False if not logs \
-            else logs[-1].message == self.end_of_log_mark.strip()
+            else logs[-1]['_source']['json']['message'] == self.end_of_log_mark.strip()
 
         cur_ts = pendulum.now()
         # Assume end of log after not receiving new log for 5 min,
@@ -153,7 +155,7 @@ class ElasticsearchTaskHandler(FileTaskHandler, LoggingMixin):
         # If we hit the end of the log, remove the actual end_of_log message
         # to prevent it from showing in the UI.
         i = len(logs) if not metadata['end_of_log'] else len(logs) - 1
-        message = '\n'.join([log.message for log in logs[0:i]])
+        message = '\n'.join([log['_source']['json']['message'] for log in logs[0:i]])
 
         return message, metadata
 
@@ -172,10 +174,10 @@ class ElasticsearchTaskHandler(FileTaskHandler, LoggingMixin):
 
         # Offset is the unique key for sorting logs given log_id.
         s = Search(using=self.client) \
-            .query('match_phrase', log_id=log_id) \
-            .sort('offset')
+            .query('match_phrase', json__log_id=log_id) \
+            .sort('json.offset')
 
-        s = s.filter('range', offset={'gt': int(offset)})
+        s = s.filter('range', json__offset={'gt': int(offset)})
         max_log_line = s.count()
         if 'download_logs' in metadata and metadata['download_logs'] and 'max_offset' not in metadata:
             try:
@@ -192,7 +194,7 @@ class ElasticsearchTaskHandler(FileTaskHandler, LoggingMixin):
             except Exception as e:
                 self.log.exception('Could not read log with log_id: %s, error: %s', log_id, str(e))
 
-        return logs
+        return logs.hits.hits
 
     def set_context(self, ti):
         """
@@ -207,7 +209,8 @@ class ElasticsearchTaskHandler(FileTaskHandler, LoggingMixin):
                 'dag_id': str(ti.dag_id),
                 'task_id': str(ti.task_id),
                 'execution_date': self._clean_execution_date(ti.execution_date),
-                'try_number': str(ti.try_number)
+                'try_number': str(ti.try_number),
+                'log_id': self._render_log_id(ti, ti.try_number)
             })
 
         if self.write_stdout:
@@ -257,3 +260,8 @@ class ElasticsearchTaskHandler(FileTaskHandler, LoggingMixin):
         super(ElasticsearchTaskHandler, self).close()
 
         self.closed = True
+
+    def emit(self, record):
+        record.offset = self.offset
+        self.offset += 1
+        super().emit(record)
