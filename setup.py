@@ -430,7 +430,7 @@ def do_setup():
         long_description=long_description,
         long_description_content_type='text/markdown',
         license='Apache License 2.0',
-        version='1.10.7rc4',
+        version='1.10.7rc5',
         packages=find_packages(exclude=['tests*']),
         package_data={
             '': ['airflow/alembic.ini', "airflow/git_version"],

@@ -209,6 +209,8 @@ if REMOTE_LOGGING:
         ELASTICSEARCH_WRITE_STDOUT = conf.get('elasticsearch', 'WRITE_STDOUT')
         ELASTICSEARCH_JSON_FORMAT = conf.get('elasticsearch', 'JSON_FORMAT')
         ELASTICSEARCH_JSON_FIELDS = conf.get('elasticsearch', 'JSON_FIELDS')
+        ELASTICSEARCH_LOG_ID_JSON_PATH = conf.get('elasticsearch', 'LOG_ID_JSON_PATH')
+        ELASTICSEARCH_OFFSET_JSON_PATH = conf.get('elasticsearch', 'OFFSET_JSON_PATH')
 
         ELASTIC_REMOTE_HANDLERS = {
             'task': {
@@ -221,7 +223,9 @@ if REMOTE_LOGGING:
                 'host': ELASTICSEARCH_HOST,
                 'write_stdout': ELASTICSEARCH_WRITE_STDOUT,
                 'json_format': ELASTICSEARCH_JSON_FORMAT,
-                'json_fields': ELASTICSEARCH_JSON_FIELDS
+                'json_fields': ELASTICSEARCH_JSON_FIELDS,
+                'log_id_json_path': ELASTICSEARCH_LOG_ID_JSON_PATH,
+                'offset_json_path': ELASTICSEARCH_OFFSET_JSON_PATH
             },
         }
 

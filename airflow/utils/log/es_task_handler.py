@@ -22,7 +22,6 @@ import elasticsearch
 import logging
 import sys
 import pendulum
-from datetime import datetime
 from elasticsearch_dsl import Search
 
 from airflow.utils import timezone
@@ -56,6 +55,7 @@ class ElasticsearchTaskHandler(FileTaskHandler, LoggingMixin):
     def __init__(self, base_log_folder, filename_template,
                  log_id_template, end_of_log_mark,
                  write_stdout, json_format, json_fields,
+                 log_id_json_path, offset_json_path,
                  host='localhost:9200',
                  es_kwargs=conf.getsection("elasticsearch_configs") or {}):
         """
@@ -79,6 +79,8 @@ class ElasticsearchTaskHandler(FileTaskHandler, LoggingMixin):
         self.json_fields = [label.strip() for label in json_fields.split(",")]
         self.handler = None
         self.context_set = False
+        self.log_id_json_path = log_id_json_path
+        self.offset_json_path = offset_json_path
         self.offset = 1
 
     def _render_log_id(self, ti, try_number):
@@ -125,9 +127,14 @@ class ElasticsearchTaskHandler(FileTaskHandler, LoggingMixin):
         offset = metadata['offset']
         log_id = self._render_log_id(ti, try_number)
 
-        logs = self.es_read(log_id, offset, metadata)
+        hits = self.es_read(log_id, offset, metadata)
 
-        next_offset = offset if not logs else logs[-1]['_source']['json']['offset']
+        logs = [{
+            'message': self._get_log_field(hit, self.log_id_json_path),
+            'offset': self._get_log_field(hit, self.offset_json_path)
+        } for hit in hits]
+
+        next_offset = offset if not logs else logs[-1]['offset']
 
         # Ensure a string here. Large offset numbers will get JSON.parsed incorrectly
         # on the client. Sending as a string prevents this issue.
@@ -137,7 +144,7 @@ class ElasticsearchTaskHandler(FileTaskHandler, LoggingMixin):
         # end_of_log_mark may contain characters like '\n' which is needed to
         # have the log uploaded but will not be stored in elasticsearch.
         metadata['end_of_log'] = False if not logs \
-            else logs[-1]['_source']['json']['message'] == self.end_of_log_mark.strip()
+            else logs[-1]['message'] == self.end_of_log_mark.strip()
 
         cur_ts = pendulum.now()
         # Assume end of log after not receiving new log for 5 min,
@@ -155,7 +162,7 @@ class ElasticsearchTaskHandler(FileTaskHandler, LoggingMixin):
         # If we hit the end of the log, remove the actual end_of_log message
         # to prevent it from showing in the UI.
         i = len(logs) if not metadata['end_of_log'] else len(logs) - 1
-        message = '\n'.join([log['_source']['json']['message'] for log in logs[0:i]])
+        message = '\n'.join([log['message'] for log in logs[0:i]])
 
         return message, metadata
 
@@ -185,16 +192,16 @@ class ElasticsearchTaskHandler(FileTaskHandler, LoggingMixin):
             except Exception:
                 self.log.exception('Could not get current log size with log_id: {}'.format(log_id))
 
-        logs = []
+        hits = []
         if max_log_line != 0:
             try:
 
-                logs = s[self.MAX_LINE_PER_PAGE * self.PAGE:self.MAX_LINE_PER_PAGE] \
+                hits = s[self.MAX_LINE_PER_PAGE * self.PAGE:self.MAX_LINE_PER_PAGE] \
                     .execute()
             except Exception as e:
                 self.log.exception('Could not read log with log_id: %s, error: %s', log_id, str(e))
 
-        return logs.hits.hits
+        return hits
 
     def set_context(self, ti):
         """
@@ -265,3 +272,14 @@ class ElasticsearchTaskHandler(FileTaskHandler, LoggingMixin):
         record.offset = self.offset
         self.offset += 1
         super().emit(record)
+
+    def _get_log_field(self, obj, field: str, sep='.', default=None):
+        attrs = field.split(sep)
+        current_obj = obj
+        try:
+            for attr in attrs:
+                current_obj = getattr(current_obj, attr)
+        except AttributeError as e:
+            self.log.exception('Error: %s. Using default value: %s.', e, default)
+            return default
+        return current_obj
